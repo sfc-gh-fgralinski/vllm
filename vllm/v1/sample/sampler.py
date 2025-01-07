@@ -124,6 +124,48 @@ class Sampler(nn.Module):
         return sampled
 
 
+def oddballness(probs):
+    sorted_indices = torch.argsort(probs, descending=True)
+
+    sorted = torch.gather(probs, -1, sorted_indices)
+
+    diff = sorted[..., :-1] - sorted[..., 1:]
+
+    if len(diff.size()) == 1:
+        numbers = torch.arange(1.0, diff.size()[-1] + 1.0).to(probs.device)
+    else:
+        numbers = (
+            torch.arange(1.0, diff.size()[-1] + 1.0)
+            .unsqueeze(0)
+            .repeat(*diff.size()[:-1], 1)
+            .to(probs.device)
+        )
+
+    cumulative_sum = torch.cumsum(numbers * diff, dim=-1)
+
+    zero = torch.zeros(*probs.size()[:-1], 1).to(probs.device)
+
+    oddball = torch.cat((zero, cumulative_sum), dim=-1)
+
+    inverted_indices = torch.argsort(sorted_indices, dim=-1)
+
+    r = torch.gather(oddball, -1, inverted_indices)
+
+    return r
+
+
+def anti_oddballness(logits, threshold):
+    probs = torch.softmax(logits, dim=-1)
+
+    oddball = oddballness(probs)
+
+    mask = oddball >= threshold
+
+    new_logits = logits.masked_fill(mask, float("-inf"))
+
+    return new_logits
+
+
 # TODO(woosuk): Optimize this with a custom kernel.
 def _apply_top_k_top_p(
     logits: torch.Tensor,
@@ -132,27 +174,4 @@ def _apply_top_k_top_p(
     no_top_p: bool,
     p: torch.Tensor,
 ) -> torch.Tensor:
-    if no_top_k and no_top_p:
-        return logits
-    logits_sort, logits_idx = logits.sort(dim=-1, descending=False)
-
-    if not no_top_k:
-        # Apply top-k.
-        top_k_mask = logits_sort.size(1) - k.to(torch.long)
-        # Get all the top_k values.
-        top_k_mask = logits_sort.gather(1, top_k_mask.unsqueeze(dim=1))
-        top_k_mask = logits_sort < top_k_mask
-        logits_sort.masked_fill_(top_k_mask, -float("inf"))
-
-    if not no_top_p:
-        # Apply top-p.
-        probs_sort = logits_sort.softmax(dim=-1)
-        probs_sum = probs_sort.cumsum(dim=-1)
-        top_p_mask = probs_sum <= 1 - p.unsqueeze(dim=1)
-        # at least one
-        top_p_mask[:, -1] = False
-        logits_sort.masked_fill_(top_p_mask, -float("inf"))
-
-    # Re-sort the probabilities.
-    logits = logits_sort.scatter(dim=-1, index=logits_idx, src=logits_sort)
-    return logits
+    return anti_oddballness(logits, 0.85)
