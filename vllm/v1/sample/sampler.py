@@ -4,6 +4,8 @@ from typing import Dict
 import torch
 import torch.nn as nn
 
+import sys
+
 from vllm.v1.outputs import SamplerOutput
 from vllm.v1.sample.metadata import SamplingMetadata
 
@@ -155,6 +157,7 @@ def oddballness(probs):
 
 
 def anti_oddballness(logits, threshold):
+    print("ANTIODDBALLNESS", file=sys.stderr)
     probs = torch.softmax(logits, dim=-1)
 
     oddball = oddballness(probs)
