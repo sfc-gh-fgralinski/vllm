@@ -469,7 +469,7 @@ def _apply_top_k_top_p(
     p: torch.Tensor,
     k: torch.Tensor,
 ) -> torch.Tensor:
-    return anti_oddballness(logits, 0.85)
+    return anti_oddballness(logits, 0.75)
 
 
 def _apply_min_p(
